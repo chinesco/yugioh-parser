@@ -1,0 +1,5 @@
+.venv/
+yugioh_reader/.venv/
+.env
+yugioh_reader/.env
+__pycache__/

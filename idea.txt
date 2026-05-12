@@ -1,0 +1,12 @@
+I'd like to build a Reachy Mini app that looks at a physical yugioh card get the name
+in it and looks it up in https://ygoprodeck.com/card-database/?num=24&offset=0
+The response must be voice generated and include:
+ the text of the card, What deck does this card go well with? In which set can i find this card?
+
+The app must be written in python and deployable in my reachy mini connected to my wifi for testing.
+
+Read https://github.com/pollen-robotics/reachy_mini/blob/main/AGENTS.md first — it has everything you need.
+
+
+
+
