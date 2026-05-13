@@ -425,9 +425,10 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             if not bg_tool.is_idle_tool_call:
                 await self._safe_response_create(
                     response={
-                        "instructions": "Use the tool result just returned and answer concisely in speech.",
+                        "instructions": "Use the tool result just returned and answer concisely in English. DO NOT speak Vietnamese.",
                     },
                 )
+
 
             # Re-synchronize the head wobble after a tool call that may have taken some time
             if self.deps.head_wobbler is not None:
@@ -445,7 +446,8 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
                 await conn.session.update(
                     session={
                         "type": "realtime",
-                        "instructions": get_session_instructions(),
+                        "instructions": "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions(),
+
                         "audio": {
                             "input": {
                                 "format": {
@@ -636,12 +638,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
 
                         if self.is_idle_tool_call:
                             self.is_idle_tool_call = False
-                        else:
-                            await self._safe_response_create(
-                                response={
-                                    "instructions": "Notify what the tool has been running giving meaningful information about the task",
-                                },
-                            )
+                        # Removed redundant "Notify what the tool has been running" call 
+                        # to prevent OpenAI response-in-progress conflicts.
+
 
                         logger.info("Started background tool: %s (id=%s, call_id=%s)", tool_name, bg_tool.tool_id, call_id)
 
@@ -723,9 +722,11 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
         # sends to the stream the stuff put in the output queue by the openai event handler
         # This is called periodically by the fastrtc Stream
 
-        # Handle idle
-        idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
-        if idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+        # Handle idle (DISABLED)
+        # idle_duration = asyncio.get_event_loop().time() - self.last_activity_time
+
+        if False and idle_duration > 15.0 and self.deps.movement_manager.is_idle():
+
             try:
                 await self.send_idle_signal(idle_duration)
             except Exception as e:
