@@ -8,7 +8,8 @@ import inspect
 import logging
 import importlib
 import importlib.util
-from typing import TYPE_CHECKING, Any, Dict, List
+import threading
+from typing import TYPE_CHECKING, Any, Dict, List, Optional
 from pathlib import Path
 from dataclasses import dataclass
 
@@ -60,10 +61,10 @@ class ToolDependencies:
     """Dependencies required by tools during execution."""
 
     current_robot: ReachyMini
-    movement_manager: MovementManager
-    camera_worker: Optional[CameraWorker] = None
+    movement_manager: Any
+    camera_worker: Optional[Any] = None
     vision_manager: Optional[Any] = None
-    head_wobbler: Optional[HeadWobbler] = None
+    head_wobbler: Optional[Any] = None
     app_stop_event: Optional[threading.Event] = None
     motion_duration_s: float = 1.0
 
