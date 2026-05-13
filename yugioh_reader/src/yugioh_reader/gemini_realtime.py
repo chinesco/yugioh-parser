@@ -68,9 +68,10 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
             
             instructions = "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions()
             config = types.LiveConnectConfig(
-                response_modalities=[types.LiveResponseModality.AUDIO],
+                response_modalities=["AUDIO"],
                 system_instruction=types.Content(parts=[types.Part.from_text(text=instructions)])
             )
+
             
             async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=config) as session:
                 self.session = session
