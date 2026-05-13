@@ -688,8 +688,9 @@ class OpenaiRealtimeHandler(AsyncStreamHandler):
             frame: A tuple containing (sample_rate, audio_data).
 
         """
-        if not self.connection:
+        if not self.connection or self.deps.movement_manager.is_muted:
             return
+
 
         input_sample_rate, audio_frame = frame
 

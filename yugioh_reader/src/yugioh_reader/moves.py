@@ -313,6 +313,14 @@ class MovementManager:
         self._freq_stats = LoopFrequencyStats()
         self._freq_snapshot = LoopFrequencyStats()
 
+        # Antenna tap detection for muting
+        self.is_muted = False
+        self._last_tap_time = 0.0
+        self._tap_threshold_rad = np.deg2rad(15)  # 15 degrees manual push triggers toggle
+        self._tap_debounce_s = 1.0  # 1 second between toggles
+        self._muted_antenna_pose = (-1.0, 1.0)  # "Sad ears" position when muted
+
+
     def queue_move(self, move: Move) -> None:
         """Queue a primary move to run after the currently executing one.
 
@@ -375,6 +383,7 @@ class MovementManager:
     def _poll_signals(self, current_time: float) -> None:
         """Apply queued commands and pending offset updates."""
         self._apply_pending_offsets()
+        self._check_antenna_taps(current_time)
 
         while True:
             try:
@@ -606,6 +615,10 @@ class MovementManager:
         last_update = self._last_listening_blend_time
         self._last_listening_blend_time = now
 
+        if self.is_muted:
+            # Force "sad ears" if muted
+            target_antennas = self._muted_antenna_pose
+
         if listening:
             antennas_cmd = listening_antennas
             new_blend = 0.0
@@ -620,7 +633,7 @@ class MovementManager:
                 listening_antennas[1] * (1.0 - new_blend) + target_antennas[1] * new_blend,
             )
 
-        if listening:
+        if listening or self.is_muted:
             self._antenna_unfreeze_blend = 0.0
         else:
             self._antenna_unfreeze_blend = new_blend
@@ -631,6 +644,36 @@ class MovementManager:
                 )
 
         return antennas_cmd
+
+    def _check_antenna_taps(self, current_time: float) -> None:
+        """Detect manual pushes on the antennas to toggle mute."""
+        if current_time - self._last_tap_time < self._tap_debounce_s:
+            return
+
+        try:
+            # Get current sensor positions
+            _, current_antennas = self.current_robot.get_current_joint_positions()
+            # Compare with last commanded position
+            last_cmd = self._last_commanded_pose[1]
+
+            diff_l = abs(current_antennas[0] - last_cmd[0])
+            diff_r = abs(current_antennas[1] - last_cmd[1])
+
+            if diff_l > self._tap_threshold_rad or diff_r > self._tap_threshold_rad:
+                self.is_muted = not self.is_muted
+                self._last_tap_time = current_time
+                self.state.update_activity()
+                status = "MUTED" if self.is_muted else "UNMUTED"
+                logger.info(f"📡 Antenna tap detected! Robot is now {status}")
+
+                # If we just muted, clear the queue and stop listening
+                if self.is_muted:
+                    self.set_listening(False)
+                    self.clear_move_queue()
+        except Exception:
+            # Best effort - sensor reading might fail occasionally
+            pass
+
 
     def _issue_control_command(self, head: NDArray[np.float32], antennas: Tuple[float, float], body_yaw: float) -> None:
         """Send the fused pose to the robot with throttled error logging."""
