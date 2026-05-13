@@ -44,8 +44,10 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
 
     async def start_up(self) -> None:
         """Initialize the Gemini Multimodal Live session."""
-        api_key = config.get("GOOGLE_API_KEY")
+        import os
+        api_key = os.environ.get("GOOGLE_API_KEY")
         if not api_key:
+
             logger.error("GOOGLE_API_KEY missing from environment/.env")
             return
 
