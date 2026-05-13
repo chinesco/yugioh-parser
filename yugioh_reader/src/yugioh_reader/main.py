@@ -212,8 +212,9 @@ def run(
     threading.Thread(target=check_stop_event, daemon=True).start()
 
     if not args.gradio:
-        stream_manager.run()
+        stream_manager.start()
     else:
+
         import uvicorn
         logger.info("Gradio interface available at http://localhost:7860/chat")
         uvicorn.run(app, host="0.0.0.0", port=7860)
