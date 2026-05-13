@@ -8,8 +8,8 @@ from datetime import datetime
 
 import cv2
 import numpy as np
-from google import generativeai as genai
 from fastrtc import AdditionalOutputs, AsyncStreamHandler, wait_for_item, audio_to_int16
+
 from numpy.typing import NDArray
 from scipy.signal import resample
 
@@ -51,28 +51,38 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
             logger.error("GOOGLE_API_KEY missing from environment/.env")
             return
 
-        genai.configure(api_key=api_key)
-        model = genai.GenerativeModel("gemini-2.0-flash-exp")
+        # We must use the new google-genai package for the Live API
+        try:
+            from google import genai
+        except ImportError:
+            logger.error("Please install the new SDK: pip install google-genai")
+            return
+
+        client = genai.Client(api_key=api_key)
         
         # Start the background tool manager
         self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
-        async with model.start_chat(history=[]) as session:
-            self.session = session
-            logger.info("Gemini Multimodal Live session started.")
-            
-            # Initial prompt/setup
-            instructions = "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions()
-            await self.session.send_message(instructions)
-            
-            # Background task to stream video frames to Gemini
-            asyncio.create_task(self._stream_video())
-            
-            # Keep session alive and handle incoming events
-            # (In a real Bidi-stream, we would iterate over the response stream here)
-            # This is a high-level representation of the loop.
-            while True:
-                await asyncio.sleep(1)
+        try:
+            async with client.aio.live.connect(model="gemini-2.0-flash-exp") as session:
+                self.session = session
+                logger.info("Gemini Multimodal Live session started.")
+                
+                # Initial prompt/setup
+                instructions = "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions()
+                await self.session.send(input=instructions)
+                
+                # Background task to stream video frames to Gemini
+                asyncio.create_task(self._stream_video())
+                
+                # Keep session alive and handle incoming events
+                async for message in session.receive():
+                    # Process incoming audio chunks here when fully implemented
+                    pass
+        except Exception as e:
+            logger.error(f"Gemini connection error: {e}")
+            self.session = None
+
 
     async def _stream_video(self):
         """Streams camera frames to Gemini at a low frequency."""
