@@ -64,17 +64,17 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
         self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
         try:
-            async with client.aio.live.connect(model="gemini-3.1-flash-live-preview") as session:
-
-
-
+            from google.genai import types
+            
+            instructions = "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions()
+            config = types.LiveConnectConfig(
+                response_modalities=[types.LiveResponseModality.AUDIO],
+                system_instruction=types.Content(parts=[types.Part.from_text(text=instructions)])
+            )
+            
+            async with client.aio.live.connect(model="gemini-3.1-flash-live-preview", config=config) as session:
                 self.session = session
-
                 logger.info("Gemini Multimodal Live session started.")
-                
-                # Initial prompt/setup
-                instructions = "MANDATORY: ALWAYS RESPOND IN ENGLISH. NEVER SPEAK VIETNAMESE. \n\n" + get_session_instructions()
-                await self.session.send(input=instructions)
                 
                 # Background task to stream video frames to Gemini
                 asyncio.create_task(self._stream_video())
@@ -95,6 +95,7 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
 
     async def _stream_video(self):
         """Streams camera frames to Gemini at a low frequency."""
+        from google.genai import types
         while self.session:
             if self.deps.camera_worker is not None and not self.deps.movement_manager.is_muted:
                 frame = self.deps.camera_worker.get_latest_frame()
@@ -103,7 +104,7 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     _, encoded_image = cv2.imencode('.jpg', rgb_frame)
                     try:
-                        await self.session.send(input={"data": encoded_image.tobytes(), "mime_type": "image/jpeg"})
+                        await self.session.send(input={"realtime_input": {"media_chunks": [{"mime_type": "image/jpeg", "data": encoded_image.tobytes()}]}})
                     except Exception as e:
                         logger.error(f"Error sending frame: {e}")
             await asyncio.sleep(1.0) # 1 FPS for vision awareness
@@ -116,7 +117,7 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
         logger.info(f"Tool {bg_tool.tool_name} finished. Sending result to Gemini.")
         
         # Send result back to Gemini
-        await self.session.send(input=f"Tool result for {bg_tool.tool_name}: {json.dumps(result)}")
+        await self.session.send(input=f"Tool result for {bg_tool.tool_name}: {json.dumps(result)}", end_of_turn=True)
 
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
         """Receive audio from mic and send to Gemini."""
@@ -126,11 +127,13 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
         input_sample_rate, audio_frame = frame
         
         try:
-            await self.session.send(input={"data": audio_frame.tobytes(), "mime_type": "audio/pcm;rate=24000"})
+            # Reachy is 24kHz. google-genai accepts audio/pcm;rate=24000
+            await self.session.send(input={"realtime_input": {"media_chunks": [{"mime_type": "audio/pcm;rate=24000", "data": audio_frame.tobytes()}]}})
         except Exception as e:
             logger.error(f"Error sending audio to Gemini: {e}")
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
+
 
         """Emit audio from Gemini to Reachy's speakers."""
         return await wait_for_item(self.output_queue)
