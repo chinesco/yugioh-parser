@@ -6,6 +6,7 @@ import time
 import asyncio
 import argparse
 import threading
+import logging
 from typing import Any, Dict, List, Optional
 
 import gradio as gr
@@ -26,12 +27,6 @@ def update_chatbot(chatbot: List[Dict[str, Any]], response: Dict[str, Any]) -> L
     """Update the chatbot with AdditionalOutputs."""
     chatbot.append(response)
     return chatbot
-
-
-def main() -> None:
-    """Entrypoint for the Reachy Mini conversation app."""
-    args, _ = parse_args()
-    run(args)
 
 
 def run(
@@ -100,39 +95,41 @@ def run(
         simulation_enabled = getattr(status, "simulation_enabled", False)
         mockup_sim_enabled = getattr(status, "mockup_sim_enabled", False)
 
-    is_simulation = simulation_enabled or mockup_sim_enabled
-
-    if is_simulation and not args.gradio:
-        logger.info("Simulation mode detected. Automatically enabling gradio flag.")
+    if simulation_enabled or mockup_sim_enabled:
+        logger.info("Simulation mode detected: Auto-enabling Gradio interface.")
         args.gradio = True
 
-    camera_worker, _, vision_manager = handle_vision_stuff(args, robot)
+    camera_worker, head_tracker, vision_manager = handle_vision_stuff(args, robot)
 
-    movement_manager = MovementManager(
-        current_robot=robot,
-        camera_worker=camera_worker,
-    )
+    # Movement manager handles the 100Hz control loop
+    movement_manager = MovementManager(robot, camera_worker)
+    movement_manager.start()
 
-    head_wobbler = HeadWobbler(set_speech_offsets=movement_manager.set_speech_offsets)
+    # Head wobbler handles audio-to-motion synchronization
+    head_wobbler = HeadWobbler(movement_manager)
 
     deps = ToolDependencies(
-        reachy_mini=robot,
+        robot=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
+        app_stop_event=app_stop_event,
     )
-    current_file_path = os.path.dirname(os.path.abspath(__file__))
-    logger.debug(f"Current file absolute path: {current_file_path}")
-    chatbot = gr.Chatbot(
-        type="messages",
-        resizable=True,
-        avatar_images=(
-            os.path.join(current_file_path, "images", "user_avatar.png"),
-            os.path.join(current_file_path, "images", "reachymini_avatar.png"),
-        ),
-    )
-    logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
+
+    with gr.Blocks() as chatbot:
+        with gr.Row():
+            chatbot_ui = gr.Chatbot(
+                label="Conversation",
+                type="messages",
+                avatar_images=(
+                    str(Path(__file__).parent / "images" / "user_avatar.png"),
+                    str(Path(__file__).parent / "images" / "reachymini_avatar.png"),
+                ),
+                scale=1,
+            )
+
+    logger.debug(f"Chatbot avatar images: {chatbot_ui.avatar_images}")
 
     if args.gemini:
         handler = GeminiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
@@ -159,126 +156,83 @@ def run(
             instance_path=instance_path,
         )._init_settings_ui_if_needed()
         
-        api_key_textbox = gr.Textbox(
+        with gr.Blocks() as stream_manager:
+            with gr.Row():
+                with gr.Column():
+                    api_key_textbox = gr.Textbox(
+                        label="API Key",
+                        type="password",
+                        placeholder="Enter API Key here if not in .env",
+                    )
+                    profile_selector = gr.Dropdown(
+                        label="Selected Personality Profile",
+                        choices=["_yugioh_reader_locked_profile"],
+                        value="_yugioh_reader_locked_profile",
+                    )
+                    apply_btn = gr.Button("Apply Personality")
+                    status_md = gr.Markdown("")
 
-            label="OPENAI API Key",
-            type="password",
-            value=os.getenv("OPENAI_API_KEY") if not get_space() else "",
-        )
+                with gr.Column():
+                    stream = Stream(handler, multimodal=True)
+                    stream.render()
 
-        
-        from yugioh_reader.gradio_personality import PersonalityUI
-        personality_ui = PersonalityUI()
-        personality_ui.create_components()
+            apply_btn.click(
+                fn=handler.apply_personality,
+                inputs=[profile_selector],
+                outputs=[status_md],
+            )
 
-        stream = Stream(
-            handler=handler,
-            mode="send-receive",
-            modality="audio",
-            additional_inputs=[
-                chatbot,
-                api_key_textbox,
-                *personality_ui.additional_inputs_ordered(),
-            ],
-            additional_outputs=[chatbot],
-            additional_outputs_handler=update_chatbot,
-            ui_args={"title": "Talk with Reachy Mini"},
-        )
-        stream_manager = stream.ui
-        app = gr.mount_gradio_app(app, stream.ui, path="/chat")
+        stream_manager.queue()
+        gr.mount_gradio_app(app, stream_manager, path="/chat")
 
     else:
-        # In headless mode, wire settings_app + instance_path to console LocalStream
+        # Headless console mode
         stream_manager = LocalStream(
             handler,
             robot,
-            settings_app=settings_app,
+            settings_app=app,
             instance_path=instance_path,
         )
 
-
-    # Each async service → its own thread/loop
-    movement_manager.start()
-    head_wobbler.start()
-    if camera_worker:
-        camera_worker.start()
-    if vision_manager:
-        vision_manager.start()
-
-    def poll_stop_event() -> None:
-        """Poll the stop event to allow graceful shutdown."""
+    # Logic to stop the app when the stop event is set (either by robot or UI)
+    def check_stop_event():
         if app_stop_event is not None:
-            app_stop_event.wait()
+            while not app_stop_event.is_set():
+                time.sleep(0.1)
+            logger.info("App stop event detected, shutting down...")
+            if hasattr(stream_manager, "close"):
+                stream_manager.close()
+            movement_manager.stop()
+            if camera_worker is not None:
+                camera_worker.stop()
+            sys.exit(0)
 
-        logger.info("App stop event detected, shutting down...")
-        try:
-            stream_manager.close()
-        except Exception as e:
-            logger.error(f"Error while closing stream manager: {e}")
+    threading.Thread(target=check_stop_event, daemon=True).start()
 
-    if app_stop_event:
-        threading.Thread(target=poll_stop_event, daemon=True).start()
-
-    try:
-        if not args.gradio:
-            stream_manager.launch()
-        else:
-            # The app is already mounted, we just need to keep the process alive
-            # or uvicorn is already running if started via a proper server.
-            # For this script, we'll just wait on the stop event.
-            if app_stop_event:
-                app_stop_event.wait()
-            else:
-                try:
-                    while True:
-                        time.sleep(1)
-                except KeyboardInterrupt:
-                    pass
-
-    except KeyboardInterrupt:
-        logger.info("Keyboard interruption in main thread... closing server.")
-    finally:
-        movement_manager.stop()
-        head_wobbler.stop()
-        if camera_worker:
-            camera_worker.stop()
-        if vision_manager:
-            vision_manager.stop()
-
-        # Ensure media is explicitly closed before disconnecting
-        try:
-            robot.media.close()
-        except Exception as e:
-            logger.debug(f"Error closing media during shutdown: {e}")
-
-        # prevent connection to keep alive some threads
-        robot.client.disconnect()
-        time.sleep(1)
-        logger.info("Shutdown complete.")
+    if not args.gradio:
+        stream_manager.run()
+    else:
+        import uvicorn
+        logger.info("Gradio interface available at http://localhost:7860/chat")
+        uvicorn.run(app, host="0.0.0.0", port=7860)
 
 
-class YugiohReader(ReachyMiniApp):  # type: ignore[misc]
-    """Reachy Mini Apps entry point for the conversation app."""
-
-    custom_app_url = "http://0.0.0.0:7860/"
-    dont_start_webserver = False
-
+class YugiohReader(ReachyMiniApp):
+    """Reachy Mini application for Yu-Gi-Oh card identification."""
+    
+    name = "yugioh_reader"
+    description = "Yu-Gi-Oh! Card Expert"
+    custom_app_url = "http://0.0.0.0:7860/chat"
+    
     def run(self, reachy_mini: ReachyMini, stop_event: threading.Event) -> None:
         """Run the Reachy Mini conversation app."""
-        loop = asyncio.new_event_loop()
-        asyncio.set_event_loop(loop)
-
         args, _ = parse_args()
-
-        # is_wireless = reachy_mini.client.get_status()["wireless_version"]
-        # args.head_tracker = None if is_wireless else "mediapipe"
-
         instance_path = self._get_instance_path().parent
+        
         run(
             args,
             robot=reachy_mini,
             app_stop_event=stop_event,
-            settings_app=self.settings_app,
             instance_path=instance_path,
         )
 
