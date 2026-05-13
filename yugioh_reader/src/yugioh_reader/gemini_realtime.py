@@ -58,13 +58,14 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
             logger.error("Please install the new SDK: pip install google-genai")
             return
 
-        client = genai.Client(api_key=api_key, http_options={'api_version': 'v1alpha'})
+        client = genai.Client(api_key=api_key)
         
         # Start the background tool manager
         self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
         try:
-            async with client.aio.live.connect(model="gemini-2.0-flash-exp") as session:
+            async with client.aio.live.connect(model="gemini-2.5-flash") as session:
+
 
                 self.session = session
 
