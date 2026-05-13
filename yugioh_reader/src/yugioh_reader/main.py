@@ -212,7 +212,8 @@ def run(
     threading.Thread(target=check_stop_event, daemon=True).start()
 
     if not args.gradio:
-        stream_manager.start()
+        stream_manager.launch()
+
     else:
 
         import uvicorn
