@@ -77,13 +77,18 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
                 asyncio.create_task(self._stream_video())
                 
                 # Keep session alive and handle incoming events
-                async for message in session.receive():
-                    # Process incoming audio chunks here when fully implemented
-                    pass
+                async for response in session.receive():
+                    if response.server_content is not None:
+                        model_turn = response.server_content.model_turn
+                        if model_turn:
+                            for part in model_turn.parts:
+                                if part.inline_data and part.inline_data.mime_type.startswith("audio/pcm"):
+                                    audio_data = part.inline_data.data
+                                    audio_arr = np.frombuffer(audio_data, dtype=np.int16)
+                                    await self.output_queue.put((24000, audio_arr))
         except Exception as e:
             logger.error(f"Gemini connection error: {e}")
             self.session = None
-
 
     async def _stream_video(self):
         """Streams camera frames to Gemini at a low frequency."""
@@ -94,8 +99,10 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
                     # Convert to RGB and encode for Gemini
                     rgb_frame = cv2.cvtColor(frame, cv2.COLOR_BGR2RGB)
                     _, encoded_image = cv2.imencode('.jpg', rgb_frame)
-                    # Send frame to Gemini as a part of the multimodal stream
-                    # await self.session.send_message([encoded_image.tobytes(), "Vision update"])
+                    try:
+                        await self.session.send(input={"data": encoded_image.tobytes(), "mime_type": "image/jpeg"})
+                    except Exception as e:
+                        logger.error(f"Error sending frame: {e}")
             await asyncio.sleep(1.0) # 1 FPS for vision awareness
 
     async def _handle_tool_result(self, bg_tool: ToolNotification) -> None:
@@ -106,18 +113,22 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
         logger.info(f"Tool {bg_tool.tool_name} finished. Sending result to Gemini.")
         
         # Send result back to Gemini
-        await self.session.send_message(f"Tool result for {bg_tool.tool_name}: {json.dumps(result)}")
+        await self.session.send(input=f"Tool result for {bg_tool.tool_name}: {json.dumps(result)}")
 
     async def receive(self, frame: Tuple[int, NDArray[np.int16]]) -> None:
         """Receive audio from mic and send to Gemini."""
         if not self.session or self.deps.movement_manager.is_muted:
             return
         
-        # Logic to send audio chunks to Gemini's multimodal stream
-        # This would use the GenAI SDK's streaming features
-        pass
+        input_sample_rate, audio_frame = frame
+        
+        try:
+            await self.session.send(input={"data": audio_frame.tobytes(), "mime_type": "audio/pcm;rate=24000"})
+        except Exception as e:
+            logger.error(f"Error sending audio to Gemini: {e}")
 
     async def emit(self) -> Tuple[int, NDArray[np.int16]] | AdditionalOutputs | None:
+
         """Emit audio from Gemini to Reachy's speakers."""
         return await wait_for_item(self.output_queue)
 
