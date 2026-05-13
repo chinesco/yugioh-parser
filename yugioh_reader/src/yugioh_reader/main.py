@@ -109,13 +109,14 @@ def run(
     head_wobbler = HeadWobbler(movement_manager)
 
     deps = ToolDependencies(
-        robot=robot,
+        current_robot=robot,
         movement_manager=movement_manager,
         camera_worker=camera_worker,
         vision_manager=vision_manager,
         head_wobbler=head_wobbler,
         app_stop_event=app_stop_event,
     )
+
 
     with gr.Blocks() as chatbot:
         with gr.Row():
