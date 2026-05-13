@@ -57,14 +57,14 @@ def get_concrete_subclasses(base: type[Tool]) -> List[type[Tool]]:
 
 @dataclass
 class ToolDependencies:
-    """External dependencies injected into tools."""
+    """Dependencies required by tools during execution."""
 
-    reachy_mini: ReachyMini
-    movement_manager: Any  # MovementManager from moves.py
-    # Optional deps
-    camera_worker: Any | None = None  # CameraWorker for frame buffering
-    vision_manager: Any | None = None
-    head_wobbler: Any | None = None  # HeadWobbler for audio-reactive motion
+    current_robot: ReachyMini
+    movement_manager: MovementManager
+    camera_worker: Optional[CameraWorker] = None
+    vision_manager: Optional[Any] = None
+    head_wobbler: Optional[HeadWobbler] = None
+    app_stop_event: Optional[threading.Event] = None
     motion_duration_s: float = 1.0
 
 
