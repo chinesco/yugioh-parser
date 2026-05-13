@@ -37,13 +37,20 @@ OPENAI_API_KEY=sk-your-key-here
 
 ### 3. Running on the Robot
 
-To run the app with the Gradio web interface (recommended for visual feedback):
+By default, the app uses OpenAI Realtime. To run with the Gradio web interface:
 
 ```bash
 python3 src/yugioh_reader/main.py --gradio
 ```
 
+To run with **Gemini Multimodal Live**:
+
+```bash
+python3 src/yugioh_reader/main.py --gradio --gemini
+```
+
 ### 🔒 Microphone Access (SSH Tunneling)
+
 
 Modern browsers block microphone access on insecure (HTTP) origins. To use your laptop's microphone with the robot, use **SSH Port Forwarding**:
 

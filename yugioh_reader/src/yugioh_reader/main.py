@@ -46,6 +46,7 @@ def run(
     from yugioh_reader.moves import MovementManager
     from yugioh_reader.console import LocalStream
     from yugioh_reader.openai_realtime import OpenaiRealtimeHandler
+    from yugioh_reader.gemini_realtime import GeminiRealtimeHandler
     from yugioh_reader.tools.core_tools import ToolDependencies
     from yugioh_reader.audio.head_wobbler import HeadWobbler
 
@@ -133,7 +134,12 @@ def run(
     )
     logger.debug(f"Chatbot avatar images: {chatbot.avatar_images}")
 
-    handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+    if args.gemini:
+        handler = GeminiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+        logger.info("Using Gemini Multimodal Live backend")
+    else:
+        handler = OpenaiRealtimeHandler(deps, gradio_mode=args.gradio, instance_path=instance_path)
+        logger.info("Using OpenAI Realtime backend")
 
     # Initialize the app and stream manager
     if not settings_app:
