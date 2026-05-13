@@ -64,7 +64,8 @@ class GeminiRealtimeHandler(AsyncStreamHandler):
         self.tool_manager.start_up(tool_callbacks=[self._handle_tool_result])
 
         try:
-            async with client.aio.live.connect(model="gemini-2.5-flash") as session:
+            async with client.aio.live.connect(model="gemini-3.1-flash-live-preview") as session:
+
 
 
                 self.session = session
